@@ -38,6 +38,15 @@
             <p v-if="error" class="text-danger text-center mt-3">{{ error }}</p>
             <p v-if="loading" class="text-center text-primary">Processing...</p>
           </div>
+          <!-- Logs Section -->
+          <div class="logs mt-3">
+            <h5 class="text-center">Logs</h5>
+            <ul class="list-group">
+              <li v-for="log in logs" :key="log.id" class="list-group-item">
+                <strong>{{ log.label }}:</strong> {{ log.message }}
+              </li>
+            </ul>
+          </div>
           <div class="card-footer text-center">
             <p>
               <span v-if="isSignup">Already have an account?</span>
@@ -68,12 +77,17 @@ export default {
       isSignup: false,
       error: "",
       loading: false,
+      logs: [], // Store logs with labels
     };
   },
   methods: {
+    logMessage(label, message) {
+      this.logs.push({ id: Date.now(), label, message }); // Add labeled logs with unique IDs
+    },
     toggleSignup() {
       this.isSignup = !this.isSignup;
       this.error = "";
+      this.logs = []; // Clear logs when switching modes
     },
     async signup() {
       try {
@@ -85,8 +99,9 @@ export default {
         const salt = generateSalt();
         const verifier = await calculateVerifier(this.password, salt);
 
-        console.log(`Signup -> Salt: ${salt}, Verifier: ${verifier}`);
-        console.log(`Password:${this.password}`)
+        // Log computed values
+        this.logMessage("Generated Salt", salt);
+        this.logMessage("Computed Verifier", verifier);
 
         await axios.post("http://127.0.0.1:5000/register", {
           username: this.username,
@@ -94,11 +109,12 @@ export default {
           verifier,
         });
 
+        this.logMessage("Status", "Registration successful");
         alert("Registration successful. Please log in.");
         this.toggleSignup();
       } catch (error) {
-        console.error("Error during signup:", error);
         this.error = error.response?.data?.message || "Signup failed.";
+        this.logMessage("Error during signup", this.error);
       }
     },
     async login() {
@@ -108,42 +124,40 @@ export default {
       }
 
       this.loading = true;
+      this.logs = []; // Clear logs before new login attempt
 
       try {
-        // Step 1: Initiate login
-        console.log("Initiating login...");
+        this.logMessage("Status", "Initiating login...");
         const { data } = await axios.post("http://127.0.0.1:5000/login/initiate", {
           username: this.username,
         });
 
-        console.log("Received response from /login/initiate:", data);
-
         const { salt, B } = data;
+        this.logMessage("Received Salt", salt);
+        this.logMessage("Received B", B);
 
-        // Step 2: Generate private ephemeral value 'a' and public value 'A'
         const a = BigInt(Math.floor(Math.random() * 1e9));
         const A = modExp(g, a, N);
 
-        console.log(`Computed -> A: ${A}, a: ${a}, B: ${B}`);
+        this.logMessage("Computed A", A);
+        this.logMessage("Generated Private Value a", a);
 
-        // Step 3: Compute scrambling parameter 'u' and shared secret 'S_client'
-        const u = BigInt(`0x${await hash(`${A}:${B}`)}`) % N; // Convert hash result to BigInt
-        const x = BigInt(`0x${await hash(`${salt}:${this.password}`)}`); // Convert hash result to BigInt
+        const u = BigInt(`0x${await hash(`${A}:${B}`)}`) % N;
+        const x = BigInt(`0x${await hash(`${salt}:${this.password}`)}`);
         const S_client = modExp(BigInt(B), a + u * x, N);
         const K_client = await hash(`${S_client}`);
-        console.log(`Password:${this.password}`);
-        console.log(
-          `Computed -> u: ${u}, x: ${x}, S_client: ${S_client}, K_client: ${K_client}`
-        );
 
-        // Step 4: Verify with the server
-        console.log("Sending /login/verify request...");
+        this.logMessage("Scrambling Parameter u", u);
+        this.logMessage("Computed x", x);
+        this.logMessage("Shared Secret S_client", S_client);
+        this.logMessage("Session Key K_client", K_client);
+
         const verifyResponse = await axios.post("http://127.0.0.1:5000/login/verify", {
           username: this.username,
-          A: A.toString(), // Serialize BigInt as string
+          A: A.toString(),
         });
 
-        console.log("Received response from /login/verify:", verifyResponse.data);
+        this.logMessage("Server Response", JSON.stringify(verifyResponse.data));
 
         if (verifyResponse.data.K_server === K_client) {
           alert("Login successful");
@@ -151,8 +165,8 @@ export default {
           throw new Error("Verification failed");
         }
       } catch (error) {
-        console.error("Error during login:", error);
         this.error = error.response?.data?.message || "Login failed.";
+        this.logMessage("Error during login", this.error);
       } finally {
         this.loading = false;
       }
@@ -168,6 +182,19 @@ export default {
 .card {
   border-radius: 10px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+.logs {
+  background: #f8f9fa;
+  padding: 10px;
+  border-radius: 8px;
+}
+.logs ul {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.logs li {
+  font-family: "Courier New", Courier, monospace;
+  margin: 5px 0;
 }
 .btn-link {
   color: #007bff;
